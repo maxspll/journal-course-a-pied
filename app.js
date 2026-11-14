@@ -155,12 +155,7 @@ function fmtPace(secPerKm) {
   return `${m}:${String(s).padStart(2, "0")} /km`;
 }
 
-function normalizeActivity(raw) {
-  const a = {};
-  for (const [k, v] of Object.entries(raw)) {
-    const f = matchField(k);
-    if (f && !a[f]) a[f] = v;
-  }
+function finalizeActivity(a) {
   const act = {
     id: uid(),
     date: a.date || todayISO(),
@@ -174,7 +169,7 @@ function normalizeActivity(raw) {
     elevation: parseNumber(a.elevation),
     calories: parseNumber(a.calories),
     cadence: parseNumber(a.cadence),
-    source: raw.__source || "import"
+    source: a.source || "import"
   };
   if (act.distance != null && act.duration > 0) {
     act.pace = act.duration / act.distance;
@@ -191,6 +186,36 @@ function normalizeActivity(raw) {
     act.title = act.type || "Activité";
   }
   return act;
+}
+
+function normalizeActivity(raw) {
+  const a = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const f = matchField(k);
+    if (f && !a[f]) a[f] = v;
+  }
+  return finalizeActivity(a);
+}
+
+function activitiesFromParsed(raws, source) {
+  return raws.map(r => finalizeActivity({
+    date: r.Date, title: "", type: r.Type,
+    distance: r.Distance, duration: r.Duration,
+    hr: r["Avg HR"], maxHr: r["Max HR"],
+    elevation: r["Elevation Gain"], calories: r.Calories,
+    source
+  })).filter(a => a.distance != null || a.duration != null || parseDate(a.date));
+}
+
+async function parseActivityFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".fit")) {
+    return activitiesFromParsed(parseFIT(await file.arrayBuffer()), file.name);
+  }
+  if (name.endsWith(".tcx")) {
+    return activitiesFromParsed(parseTCX(await file.text()), file.name);
+  }
+  return activitiesFromCSV(await file.text(), file.name);
 }
 
 function isKeyValueFormat(rows) {
@@ -400,7 +425,7 @@ function setupCoros() {
   const report = document.getElementById("coros-import-report");
   document.getElementById("coros-file").addEventListener("change", async ev => {
     let total = 0;
-    for (const file of ev.target.files) total += importCorosActivities(activitiesFromCSV(await file.text(), file.name), report);
+    for (const file of ev.target.files) total += importCorosActivities(await parseActivityFile(file), report);
     ev.target.value = "";
     renderActivitiesTable();
     if (total) switchView("coros");

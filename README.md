@@ -36,13 +36,15 @@ python3 -m http.server 8080
 
 ### 1. Import de fichiers (fonctionne immédiatement)
 
-Depuis l'app COROS ou le site web, exporte tes activités en CSV, puis :
+Depuis l'app COROS ou le site web, exporte tes activités au format **FIT**,
+**TCX** ou CSV, puis :
 
-- onglet **COROS** → « Importer CSV COROS » (ou colle le contenu).
+- onglet **COROS** → « Importer fichiers COROS » (plusieurs fichiers à la fois,
+  ou colle le contenu d'un CSV).
 
-Le parseur reconnaît automatiquement les colonnes courantes
-(date, type, distance, durée, allure, FC, dénivelé, calories…) en français
-comme en anglais, et calcule l'allure si elle manque.
+Le décodeur intégré lit le format binaire FIT (sans dépendance), le XML TCX et
+les CSV (colonnes ou clé/valeur, français ou anglais), et calcule l'allure si
+elle manque.
 
 Un fichier d'exemple est fourni : `exemple-coros.csv`.
 
@@ -71,6 +73,7 @@ directement dans le Journal.
 index.html          interface
 styles.css          style
 app.js              logique (CSV, journal, stats, export)
+fit.js              décodeur FIT (binaire) + parseur TCX, sans dépendance
 server.js           proxy optionnel pour l'API COROS (sans dépendance)
 exemple-coros.csv   exemple d'import
 ```
