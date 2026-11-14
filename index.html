@@ -75,8 +75,8 @@
     <h2>Données COROS</h2>
     <div class="card">
       <h3>1. Import de fichiers (recommandé)</h3>
-      <p class="hint">Depuis l'app ou le site COROS : exporte tes activités en CSV, puis importe-les ici. Les activités sont reconnues automatiquement (format colonnes ou format clé/valeur).</p>
-      <label class="btn primary">Importer CSV COROS<input type="file" id="coros-file" accept=".csv,text/csv" multiple hidden></label>
+      <p class="hint">Depuis l'app ou le site COROS : exporte tes activités au format <strong>FIT</strong>, <strong>TCX</strong> ou CSV, puis importe-les ici (plusieurs fichiers à la fois). Les activités sont reconnues automatiquement.</p>
+      <label class="btn primary">Importer fichiers COROS (.fit, .tcx, .csv)<input type="file" id="coros-file" accept=".fit,.tcx,.csv,text/csv" multiple hidden></label>
       <textarea id="coros-paste" rows="6" placeholder="…ou colle directement le contenu d'un CSV COROS ici"></textarea>
       <button class="btn" id="coros-parse-paste">Analyser le texte collé</button>
       <div id="coros-import-report" class="report"></div>
@@ -93,6 +93,20 @@
         <button class="btn" id="coros-save-settings">Enregistrer les réglages</button>
       </div>
       <div id="coros-api-report" class="report"></div>
+    </div>
+    <div class="card">
+      <h3>3. Synchronisation Strava (COROS → Strava → webapp)</h3>
+      <p class="hint">Dans l'app COROS : Réglages → Connexions → relie ton compte Strava. Crée ensuite une app API gratuite sur <code>strava.com/settings/api</code> (Callback Domain : <code>localhost</code>), colle tes identifiants ici, et lance le proxy (<code>node server.js</code>). Tes courses arriveront automatiquement.</p>
+      <div class="row">
+        <input type="text" id="strava-client-id" placeholder="Client ID Strava">
+        <input type="password" id="strava-client-secret" placeholder="Client Secret Strava">
+      </div>
+      <div class="row">
+        <button class="btn" id="strava-save">Enregistrer les réglages</button>
+        <button class="btn primary" id="strava-connect">Connecter mon compte Strava</button>
+        <button class="btn primary" id="strava-sync">Synchroniser les activités</button>
+      </div>
+      <div id="strava-report" class="report"></div>
     </div>
     <div class="card">
       <h3>Activités importées</h3>
@@ -133,6 +147,7 @@
   <p>Journal Course à Pied · données locales · export JSON / Markdown / CSV</p>
 </footer>
 
+<script src="fit.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

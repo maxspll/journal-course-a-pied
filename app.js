@@ -155,12 +155,7 @@ function fmtPace(secPerKm) {
   return `${m}:${String(s).padStart(2, "0")} /km`;
 }
 
-function normalizeActivity(raw) {
-  const a = {};
-  for (const [k, v] of Object.entries(raw)) {
-    const f = matchField(k);
-    if (f && !a[f]) a[f] = v;
-  }
+function finalizeActivity(a) {
   const act = {
     id: uid(),
     date: a.date || todayISO(),
@@ -174,7 +169,7 @@ function normalizeActivity(raw) {
     elevation: parseNumber(a.elevation),
     calories: parseNumber(a.calories),
     cadence: parseNumber(a.cadence),
-    source: raw.__source || "import"
+    source: a.source || "import"
   };
   if (act.distance != null && act.duration > 0) {
     act.pace = act.duration / act.distance;
@@ -191,6 +186,124 @@ function normalizeActivity(raw) {
     act.title = act.type || "Activité";
   }
   return act;
+}
+
+function normalizeActivity(raw) {
+  const a = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const f = matchField(k);
+    if (f && !a[f]) a[f] = v;
+  }
+  return finalizeActivity(a);
+}
+
+function activitiesFromParsed(raws, source) {
+  return raws.map(r => finalizeActivity({
+    date: r.Date, title: "", type: r.Type,
+    distance: r.Distance, duration: r.Duration,
+    hr: r["Avg HR"], maxHr: r["Max HR"],
+    elevation: r["Elevation Gain"], calories: r.Calories,
+    source
+  })).filter(a => a.distance != null || a.duration != null || parseDate(a.date));
+}
+
+const STRAVA_TYPES = {
+  Run: "Course à pied", VirtualRun: "Course virtuelle", Walk: "Marche",
+  Ride: "Vélo", VirtualRide: "Vélo virtuel", Swim: "Natation", Hike: "Randonnée"
+};
+
+function activitiesFromStrava(list) {
+  return list.map(s => finalizeActivity({
+    date: (s.start_date || "").slice(0, 10) || null,
+    title: s.name || "",
+    type: STRAVA_TYPES[s.type] || s.type || "Course",
+    distance: s.distance != null ? s.distance / 1000 : null,
+    duration: s.moving_time || s.elapsed_time || null,
+    hr: s.average_heartrate || null,
+    maxHr: s.max_heartrate || null,
+    elevation: s.total_elevation_gain || null,
+    calories: s.calories || null,
+    source: "Strava"
+  })).filter(a => a.distance != null || a.duration != null || parseDate(a.date));
+}
+
+function stravaProxy() {
+  return document.getElementById("coros-proxy-url").value.trim().replace(/\/$/, "");
+}
+
+function stravaConnect() {
+  const report = document.getElementById("strava-report");
+  const proxy = stravaProxy();
+  if (!proxy) {
+    report.textContent = "Renseigne d'abord l'URL du proxy (ex. http://localhost:8787).";
+    report.classList.add("error");
+    return;
+  }
+  report.classList.remove("error");
+  const back = encodeURIComponent(location.origin + location.pathname);
+  location.href = proxy + "/api/strava/authorize?state=" + back;
+}
+
+async function stravaSaveConfig() {
+  const report = document.getElementById("strava-report");
+  const proxy = stravaProxy();
+  const clientId = document.getElementById("strava-client-id").value.trim();
+  const clientSecret = document.getElementById("strava-client-secret").value.trim();
+  if (!proxy || !clientId || !clientSecret) {
+    report.textContent = "Proxy, Client ID et Client Secret sont tous nécessaires.";
+    report.classList.add("error");
+    return;
+  }
+  try {
+    const res = await fetch(proxy + "/api/strava/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret })
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    report.textContent = "Réglages Strava enregistrés. Tu peux connecter ton compte.";
+    report.classList.remove("error");
+  } catch (e) {
+    report.textContent = "Impossible d'enregistrer : " + e.message + " (proxy lancé ? node server.js)";
+    report.classList.add("error");
+  }
+}
+
+async function stravaSync() {
+  const report = document.getElementById("strava-report");
+  const proxy = stravaProxy();
+  if (!proxy) {
+    report.textContent = "Renseigne d'abord l'URL du proxy (ex. http://localhost:8787).";
+    report.classList.add("error");
+    return;
+  }
+  report.classList.remove("error");
+  report.textContent = "Synchronisation Strava en cours…";
+  try {
+    const res = await fetch(proxy + "/api/strava/activities");
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || "HTTP " + res.status);
+    }
+    const data = await res.json();
+    const acts = activitiesFromStrava(data.activities || []);
+    importCorosActivities(acts, report);
+    renderActivitiesTable();
+  } catch (e) {
+    report.textContent = "Échec de synchronisation Strava : " + e.message + " (proxy lancé ? node server.js)";
+    report.classList.add("error");
+  }
+}
+
+async function parseActivityFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".fit")) {
+    return activitiesFromParsed(parseFIT(await file.arrayBuffer()), file.name);
+  }
+  if (name.endsWith(".tcx")) {
+    return activitiesFromParsed(parseTCX(await file.text()), file.name);
+  }
+  return activitiesFromCSV(await file.text(), file.name);
 }
 
 function isKeyValueFormat(rows) {
@@ -257,23 +370,63 @@ function renderJournal() {
   for (const e of entries) {
     const div = document.createElement("article");
     div.className = "entry type-" + e.type;
+    div.dataset.entry = e.id;
     let body = "";
     if (e.type === "note") body = `<p class="entry-body">${esc(e.content)}</p>`;
     if (e.type === "table") body = renderHTMLTable(e.table);
     if (e.type === "activity") body = activitySummaryHTML(e.activity);
+    const tableActions = e.type === "table"
+      ? `<button class="btn" data-edit="${e.id}">Modifier</button><button class="btn" data-csv="${e.id}">Export CSV</button>`
+      : "";
     div.innerHTML = `
       <div class="entry-head">
         <div>
           <p class="entry-title">${esc(e.title || typeLabels[e.type])}</p>
           <span class="entry-meta">${esc(fmtDate(e.date))} · ${typeLabels[e.type] || e.type}</span>
         </div>
-        <div class="entry-actions"><button class="btn" data-del="${e.id}">Supprimer</button></div>
+        <div class="entry-actions">${tableActions}<button class="btn" data-del="${e.id}">Supprimer</button></div>
       </div>
       ${body}`;
     feed.appendChild(div);
   }
-  feed.querySelectorAll("[data-del]").forEach(btn =>
-    btn.addEventListener("click", () => deleteEntry(btn.dataset.del)));
+}
+
+function tableToCSV(table) {
+  const cell = c => {
+    const s = String(c == null ? "" : c);
+    return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  return [table.headers, ...table.rows].map(r => r.map(cell).join(",")).join("\n");
+}
+
+function editTableEntry(id) {
+  const e = state.entries.find(x => x.id === id);
+  const art = document.querySelector('[data-entry="' + id + '"]');
+  if (!e || !art || e.type !== "table") return;
+  const t = e.table;
+  const ths = t.headers.map(h => `<th contenteditable="true">${esc(h)}</th>`).join("");
+  const rows = t.rows.map(r => `<tr>${r.map(c => `<td contenteditable="true">${esc(c)}</td>`).join("")}</tr>`).join("");
+  art.querySelector(".table-wrap").innerHTML = `
+    <table class="editing"><thead><tr>${ths}</tr></thead><tbody>${rows}</tbody></table>
+    <div class="row" style="margin-top:.5rem">
+      <button class="btn primary" data-save="${id}">Enregistrer</button>
+      <button class="btn" data-cancel="${id}">Annuler</button>
+      <button class="btn" data-addrow="${id}">+ Ligne</button>
+      <button class="btn" data-addcol="${id}">+ Colonne</button>
+    </div>`;
+}
+
+function saveTableEntry(id, art) {
+  const e = state.entries.find(x => x.id === id);
+  const table = art.querySelector("table.editing");
+  if (!e || !table) return;
+  const trs = [...table.querySelectorAll("tr")];
+  const cells = tr => [...tr.children].map(td => td.textContent.trim());
+  const headers = cells(trs[0]);
+  const rows = trs.slice(1).map(cells);
+  e.table = { headers, rows };
+  save();
+  renderJournal();
 }
 
 function renderHTMLTable(table) {
@@ -400,7 +553,7 @@ function setupCoros() {
   const report = document.getElementById("coros-import-report");
   document.getElementById("coros-file").addEventListener("change", async ev => {
     let total = 0;
-    for (const file of ev.target.files) total += importCorosActivities(activitiesFromCSV(await file.text(), file.name), report);
+    for (const file of ev.target.files) total += importCorosActivities(await parseActivityFile(file), report);
     ev.target.value = "";
     renderActivitiesTable();
     if (total) switchView("coros");
@@ -421,6 +574,9 @@ function setupCoros() {
     state.settings.corosToken = tokenInput.value.trim();
     save();
   });
+  document.getElementById("strava-connect").addEventListener("click", stravaConnect);
+  document.getElementById("strava-sync").addEventListener("click", stravaSync);
+  document.getElementById("strava-save").addEventListener("click", stravaSaveConfig);
   document.getElementById("coros-sync").addEventListener("click", async () => {
     const apiReport = document.getElementById("coros-api-report");
     const url = proxyInput.value.trim();
@@ -636,6 +792,40 @@ function setup() {
       renderJournal();
     }));
   document.getElementById("journal-search").addEventListener("input", renderJournal);
+  document.getElementById("journal-feed").addEventListener("click", ev => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+    const art = btn.closest(".entry");
+    if (btn.dataset.del) deleteEntry(btn.dataset.del);
+    else if (btn.dataset.edit) editTableEntry(btn.dataset.edit);
+    else if (btn.dataset.csv) {
+      const e = state.entries.find(x => x.id === btn.dataset.csv);
+      if (e) download((e.title || "tableau") + ".csv", tableToCSV(e.table), "text/csv");
+    }
+    else if (btn.dataset.save) saveTableEntry(btn.dataset.save, art);
+    else if (btn.dataset.cancel) renderJournal();
+    else if (btn.dataset.addrow) {
+      const table = art.querySelector("table.editing");
+      const tr = document.createElement("tr");
+      for (let i = 0; i < table.querySelectorAll("thead th").length; i++) {
+        const td = document.createElement("td");
+        td.setAttribute("contenteditable", "true");
+        tr.appendChild(td);
+      }
+      table.querySelector("tbody").appendChild(tr);
+    }
+    else if (btn.dataset.addcol) {
+      const table = art.querySelector("table.editing");
+      const th = document.createElement("th");
+      th.setAttribute("contenteditable", "true");
+      table.querySelector("thead tr").appendChild(th);
+      table.querySelectorAll("tbody tr").forEach(tr => {
+        const td = document.createElement("td");
+        td.setAttribute("contenteditable", "true");
+        tr.appendChild(td);
+      });
+    }
+  });
   setupNotes();
   setupTables();
   setupCoros();
