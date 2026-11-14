@@ -898,82 +898,212 @@ function setupData() {
 
 const MONTHS_FR = {
   "janv": 0, "jan": 0, "janvier": 0,
-  "fevr": 1, "fev": 1, "févr": 1, "fév": 1, "février": 1, "fevrier": 1,
+  "fevr": 1, "fev": 1, "f\u00e9vr": 1, "f\u00e9v": 1, "f\u00e9vrier": 1, "fevrier": 1,
   "mars": 2, "mar": 2,
   "avr": 3, "avril": 3,
   "mai": 4,
   "juin": 5, "jun": 5,
   "juil": 6, "juill": 6, "jul": 6, "juillet": 6,
-  "aout": 7, "août": 7,
+  "aout": 7, "ao\u00fbt": 7,
   "sept": 8, "sep": 8, "septembre": 8,
   "oct": 9, "octobre": 9,
   "nov": 10, "novembre": 10,
-  "dec": 11, "déc": 11, "décembre": 11, "decembre": 11
+  "dec": 11, "d\u00e9c": 11, "d\u00e9cembre": 11, "decembre": 11
 };
 
-function parsePlanLine(line, today) {
+function inferYear(d, today, adjust) {
+  if (adjust && d < new Date(today.getFullYear(), today.getMonth(), today.getDate() - 180)) {
+    d = new Date(d.getFullYear() + 1, d.getMonth(), d.getDate());
+  }
+  return d;
+}
+
+function cutAt(s, idx, len) {
+  return s.slice(0, idx) + " " + s.slice(idx + len);
+}
+
+function cleanLabel(s) {
+  return s
+    .replace(/[\u2013\u2014]+/g, "-")
+    .replace(/,\s+/g, " ").replace(/,$/, "")
+    .replace(/[\s\u00b7;|]+/g, " ")
+    .replace(/:\s+/g, " ")
+    .replace(/\(\s*\)/g, "")
+    .replace(/^(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+/i, "")
+    .replace(/^[-\s:]+|[-\s:]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractKm(text) {
+  let km = null;
+  const parRe = /\(([^)]*)\)/g;
+  let pm;
+  while ((pm = parRe.exec(text))) {
+    const m = pm[1].match(/(\d{1,3}(?:[.,]\d{1,2})?)\s*km?\b/i);
+    if (m) km = parseFloat(m[1].replace(",", "."));
+  }
+  if (km == null) {
+    const m = text.match(/(\d{1,3}(?:[.,]\d{1,2})?)\s*km?\b/i);
+    if (m) km = parseFloat(m[1].replace(",", "."));
+  }
+  return km != null && km > 0 && km < 500 ? km : null;
+}
+
+function parseDayMonth(text, today) {
+  let m = text.match(/(\d{1,2})(?:er)?\s*[/.–-]\s*(\d{1,2})(?:\s*[/.–-]\s*(\d{2,4}))?/);
+  if (m) {
+    const day = +m[1], mon = +m[2];
+    if (day < 1 || day > 31 || mon < 1 || mon > 12) return null;
+    let year = m[3] ? +m[3] : today.getFullYear();
+    if (year < 100) year += 2000;
+    return inferYear(new Date(year, mon - 1, day), today, !m[3]);
+  }
+  m = text.match(/(\d{1,2})(?:er)?\s+(janvier|f\u00e9vrier|fevrier|mars|avril|mai|juin|juillet|ao\u00fbt|aout|septembre|octobre|novembre|d\u00e9cembre|decembre|janv|jan|f\u00e9vr|fevr|f\u00e9v|fev|avr|juin|juil|juill|sept|oct|nov|d\u00e9c|dec)\b/i);
+  if (m) {
+    const mon = MONTHS_FR[m[2].toLowerCase().replace(".", "")];
+    if (mon == null) return null;
+    return inferYear(new Date(today.getFullYear(), mon, +m[1]), today, true);
+  }
+  return null;
+}
+
+function parseDateRange(text, today) {
+  const parts = text.split(/\s*[\u2013\u2014-]\s*/);
+  if (parts.length < 2) return null;
+  const end = parseDayMonth(parts[parts.length - 1], today);
+  if (!end) return null;
+  let start;
+  const headDay = parts[0].match(/^\s*(\d{1,2})\s*$/);
+  if (headDay) {
+    start = new Date(end.getFullYear(), end.getMonth(), +headDay[1]);
+  } else {
+    start = parseDayMonth(parts[0], today);
+  }
+  if (!start) return null;
+  if (start > end) start = new Date(end.getFullYear() - 1, start.getMonth(), start.getDate());
+  return { start, end };
+}
+
+function mkSession(date, week, label, km) {
+  return {
+    date, week,
+    label: label || "S\u00e9ance",
+    km: km != null && km > 0 && km < 500 ? km : null,
+    done: false, doneId: null, manual: false
+  };
+}
+
+function parsePlanLine(line, today, week) {
   const s = line.trim();
   if (!s) return null;
   let d = null, rest = s, m;
   m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (m) {
     d = new Date(+m[1], +m[2] - 1, +m[3]);
-    rest = s.slice(0, m.index) + " " + s.slice(m.index + m[0].length);
+    rest = cutAt(s, m.index, m[0].length);
   }
   if (!d) {
     m = s.match(/(\d{1,2})(?:er)?\s*[/.–-]\s*(\d{1,2})(?:\s*[/.–-]\s*(\d{2,4}))?/);
-    if (m) {
-      const day = +m[1], mon = +m[2];
-      if (day >= 1 && day <= 31 && mon >= 1 && mon <= 12) {
-        let year = m[3] ? +m[3] : today.getFullYear();
-        if (year < 100) year += 2000;
-        d = new Date(year, mon - 1, day);
-        if (!m[3] && d < new Date(today.getFullYear(), today.getMonth(), today.getDate() - 180)) {
-          d = new Date(year + 1, mon - 1, day);
-        }
-        rest = s.slice(0, m.index) + " " + s.slice(m.index + m[0].length);
-      }
+    if (m && +m[1] >= 1 && +m[1] <= 31 && +m[2] >= 1 && +m[2] <= 12) {
+      let year = m[3] ? +m[3] : today.getFullYear();
+      if (year < 100) year += 2000;
+      d = inferYear(new Date(year, +m[2] - 1, +m[1]), today, !m[3]);
+      rest = cutAt(s, m.index, m[0].length);
     }
   }
   if (!d) {
-    m = s.match(/(\d{1,2})(?:er)?\s+(?:[a-zéûôàèù0-9'.’-]+\s+)?(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|janv|févr|fevr|fév|fev|avr|juin|juil|juill|sept|oct|nov|déc|dec)\b/i);
+    m = s.match(/(\d{1,2})(?:er)?\s+(?:[a-z\u00e9\u00fb\u00f4\u00e0\u00e8\u00f90-9'.’-]+\s+)?(janvier|f\u00e9vrier|fevrier|mars|avril|mai|juin|juillet|ao\u00fbt|aout|septembre|octobre|novembre|d\u00e9cembre|decembre|janv|jan|f\u00e9vr|fevr|f\u00e9v|fev|avr|juin|juil|juill|sept|oct|nov|d\u00e9c|dec)\b/i);
     if (m) {
       const mon = MONTHS_FR[m[2].toLowerCase().replace(".", "")];
       if (mon != null) {
-        d = new Date(today.getFullYear(), mon, +m[1]);
-        if (d < new Date(today.getFullYear(), today.getMonth(), today.getDate() - 180)) {
-          d = new Date(today.getFullYear() + 1, mon, +m[1]);
-        }
-        rest = s.slice(0, m.index) + " " + s.slice(m.index + m[0].length);
+        d = inferYear(new Date(today.getFullYear(), mon, +m[1]), today, true);
+        rest = cutAt(s, m.index, m[0].length);
       }
     }
   }
-  if (!d) return null;
-  let km = null;
-  const kmMatch = rest.match(/(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:km|kms|k)\b/i);
-  if (kmMatch) {
-    km = parseFloat(kmMatch[1].replace(",", "."));
-    rest = rest.slice(0, kmMatch.index) + " " + rest.slice(kmMatch.index + kmMatch[0].length);
+  if (!d && week) {
+    m = s.match(/\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\b/i);
+    if (m) {
+      const num = +m[2];
+      const ws = new Date(week + "T00:00:00");
+      for (let i = 0; i < 7 && !d; i++) {
+        const cand = new Date(ws);
+        cand.setDate(cand.getDate() + i);
+        if (cand.getDate() === num) d = cand;
+      }
+      if (d) rest = cutAt(s, m.index, m[0].length);
+    }
   }
-  const label = rest.replace(/[\s–—:·,;|]+/g, " ").trim().replace(/\s+/g, " ");
-  return {
-    date: toISODate(d),
-    label: label || "Séance",
-    km: km != null && km > 0 && km < 500 ? km : null,
-    done: false, doneId: null, manual: false
-  };
+  if (!d) return null;
+  return mkSession(toISODate(d), week || toISODate(weekStart(d)), cleanLabel(rest), extractKm(rest));
 }
 
 function parsePlanText(text) {
   const today = new Date();
   const sessions = [];
   let skipped = 0;
-  for (const line of String(text).split(/\r?\n/)) {
-    const sess = parsePlanLine(line, today);
-    if (sess) sessions.push(sess);
-    else if (line.trim()) skipped++;
+  let cursor = null, week = null;
+  for (const raw of String(text).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^total\b/i.test(line) || /^week-?end\b/i.test(line)) { skipped++; continue; }
+    let m = line.match(/^mois\b[^()]*\(([^)]+)\)/i);
+    if (m) {
+      const r = parseDateRange(m[1], today);
+      if (r) cursor = toISODate(r.start);
+      continue;
+    }
+    if (/^semaine\b/i.test(line)) {
+      const par = line.match(/\(([^)]+)\)/);
+      let start = null;
+      if (par) {
+        const r = parseDateRange(par[1], today);
+        if (r) start = r.start;
+      }
+      if (!start) start = cursor ? new Date(cursor + "T00:00:00") : weekStart(today);
+      week = toISODate(start);
+      const next = new Date(start);
+      next.setDate(next.getDate() + 7);
+      cursor = toISODate(next);
+      continue;
+    }
+    const rep = line.match(/^(\d{1,2})\s*x\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*km?\b/i);
+    if (rep) {
+      if (!week) { skipped++; continue; }
+      const n = +rep[1];
+      const dist = parseFloat(rep[2].replace(",", "."));
+      const restClean = cleanLabel(line.slice(rep[0].length));
+      for (let j = 0; j < n; j++) {
+        sessions.push(mkSession(null, week, dist + " km" + (restClean ? " \u2014 " + restClean : ""), dist));
+      }
+      continue;
+    }
+    if (/^\+/.test(line) && week) {
+      const addKm = line.match(/\+?\s*(\d{1,4}(?:[.,]\d{1,2})?)\s*(km|m)\b/i);
+      let km = null;
+      if (addKm) {
+        const unit = addKm[2].toLowerCase();
+        km = parseFloat(addKm[1].replace(",", ".")) * (unit === "km" ? 1 : 0.001);
+      }
+      sessions.push(mkSession(null, week, cleanLabel(line), km));
+      continue;
+    }
+    const dated = parsePlanLine(line, today, week);
+    if (dated) { sessions.push(dated); continue; }
+    if (week) {
+      const label = cleanLabel(line);
+      const km = extractKm(line);
+      if (sessions.length && sessions[sessions.length - 1].label === "S\u00e9ance") {
+        sessions[sessions.length - 1].label = label || "S\u00e9ance";
+      } else {
+        sessions.push(mkSession(null, week, label, km));
+      }
+      continue;
+    }
+    skipped++;
   }
-  sessions.sort((a, b) => a.date.localeCompare(b.date));
+  sessions.sort((a, b) => (a.date || a.week || "").localeCompare(b.date || b.week || ""));
   return { sessions, skipped };
 }
 
@@ -1001,14 +1131,39 @@ function autoCheckPlan() {
   let changed = false;
   const acts = state.entries.filter(e => e.type === "activity").map(e => e.activity);
   for (const e of state.entries.filter(x => x.type === "plan")) {
+    const used = new Set();
     for (const s of e.sessions) {
-      if (s.manual) continue;
+      if (s.manual) { if (s.doneId) used.add(s.doneId); continue; }
+      if (!s.date) continue;
       const match = acts.find(a => {
+        if (used.has(a.id)) return false;
         const d = parseDate(a.date);
         return d && toISODate(d) === s.date && isRunning(a);
       });
       const newDone = !!match;
       const newId = match ? match.id : null;
+      if (match) used.add(match.id);
+      if (s.done !== newDone || (s.doneId || null) !== newId) {
+        s.done = newDone;
+        s.doneId = newId;
+        changed = true;
+      }
+    }
+    for (const s of e.sessions) {
+      if (s.manual || s.date || s.km == null || !s.week) continue;
+      const match = acts.find(a => {
+        if (used.has(a.id) || !isRunning(a)) return false;
+        const d = parseDate(a.date);
+        if (!d) return false;
+        const ws = new Date(s.week + "T00:00:00");
+        const wen = new Date(ws);
+        wen.setDate(wen.getDate() + 6);
+        if (d < ws || d > wen) return false;
+        return Math.abs(a.distance - s.km) <= Math.max(0.8, s.km * 0.15);
+      });
+      const newDone = !!match;
+      const newId = match ? match.id : null;
+      if (match) used.add(match.id);
       if (s.done !== newDone || (s.doneId || null) !== newId) {
         s.done = newDone;
         s.doneId = newId;
@@ -1033,8 +1188,7 @@ function renderPlan() {
     card.className = "card plan-card";
     const byWeek = new Map();
     e.sessions.forEach((s, idx) => {
-      const d = parseDate(s.date);
-      const k = d ? toISODate(weekStart(d)) : "—";
+      const k = s.week || (parseDate(s.date) ? toISODate(weekStart(parseDate(s.date))) : "\u2014");
       if (!byWeek.has(k)) byWeek.set(k, []);
       byWeek.get(k).push({ s, idx });
     });
@@ -1067,7 +1221,7 @@ function renderPlan() {
           : "";
         html += `<tr class="${x.s.done ? "session-done" : ""}">
           <td><button class="check-btn" data-ptoggle="${e.id}:${x.idx}" aria-label="Cocher la séance">${x.s.done ? "✓" : ""}</button></td>
-          <td>${esc(fmtDate(x.s.date))}</td>
+          <td>${x.s.date ? esc(fmtDate(x.s.date)) : '<span class="delta-flat">\u00e0 planifier</span>'}</td>
           <td>${esc(x.s.label)}</td>
           <td>${x.s.km != null ? x.s.km.toFixed(1) + " km" : "—"}</td>
           <td>${act ? esc((act.title || "Séance") + (real ? " · " + real : "")) : '<span class="delta-flat">—</span>'}</td>
