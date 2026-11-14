@@ -162,3 +162,19 @@ footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 1.
 @media (max-width: 640px) {
   .topbar { flex-direction: column; align-items: flex-start; }
 }
+
+/* Deltas lisibles dans les tableaux de périodes */
+.cell-delta { display: block; font-size: .72rem; margin-top: .15rem; font-weight: 600; }
+
+/* Programme */
+.plan-card .table-wrap { margin-top: .5rem; }
+.plan-week { color: var(--muted); font-size: .85rem; margin: 1rem 0 .35rem; }
+.check-btn {
+  width: 1.9rem; height: 1.9rem; border-radius: 50%;
+  border: 2px solid var(--accent-2); background: transparent;
+  color: var(--accent-2); font-size: 1rem; line-height: 1; cursor: pointer;
+  padding: 0;
+}
+.check-btn:hover { background: rgba(78, 205, 196, .15); }
+tr.session-done td { opacity: .55; }
+tr.session-done td:nth-child(3) { text-decoration: line-through; }
