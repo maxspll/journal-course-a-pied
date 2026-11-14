@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Journal Course à Pied — COROS</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🏃</span>
+    <div>
+      <h1>Journal Course à Pied</h1>
+      <p class="subtitle">Notes · Tableaux · Données COROS</p>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="journal">Journal</button>
+    <button class="tab" data-view="note">Notes</button>
+    <button class="tab" data-view="table">Tableaux</button>
+    <button class="tab" data-view="coros">COROS</button>
+    <button class="tab" data-view="stats">Stats</button>
+    <button class="tab" data-view="data">Données</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ===================== JOURNAL ===================== -->
+  <section id="view-journal" class="view active">
+    <div class="toolbar">
+      <input type="search" id="journal-search" placeholder="Rechercher dans le journal…">
+      <div class="filters" id="journal-filters">
+        <button class="chip active" data-filter="all">Tout</button>
+        <button class="chip" data-filter="note">Notes</button>
+        <button class="chip" data-filter="table">Tableaux</button>
+        <button class="chip" data-filter="activity">Activités</button>
+      </div>
+    </div>
+    <div id="journal-feed" class="feed"></div>
+  </section>
+
+  <!-- ===================== NOTES ===================== -->
+  <section id="view-note" class="view">
+    <h2>Ajouter une note</h2>
+    <div class="card">
+      <input type="date" id="note-date">
+      <input type="text" id="note-title" placeholder="Titre (ex. Sortie longue — sensations)">
+      <textarea id="note-content" rows="6" placeholder="Ta note… (ressenti, météo, chaussures, objectif…)"></textarea>
+      <div class="row">
+        <button class="btn primary" id="note-save">Ajouter au journal</button>
+        <label class="btn">Importer .txt / .md<input type="file" id="note-file" accept=".txt,.md,.markdown,text/plain" multiple hidden></label>
+      </div>
+    </div>
+    <p class="hint">Chaque note arrive directement dans le Journal, datée et exportable.</p>
+  </section>
+
+  <!-- ===================== TABLEAUX ===================== -->
+  <section id="view-table" class="view">
+    <h2>Importer un tableau</h2>
+    <div class="card">
+      <input type="date" id="table-date">
+      <input type="text" id="table-title" placeholder="Titre du tableau (ex. Plan marathon — semaine 4)">
+      <textarea id="table-csv" rows="8" placeholder="Colle ici ton tableau au format CSV (séparateur , ; ou tabulation)&#10;&#10;Jour, Séance, Distance, Allure&#10;Lundi, Footing, 8 km, 5:40/km&#10;Mardi, Fractionné, 10 km, 4:50/km"></textarea>
+      <div class="row">
+        <button class="btn primary" id="table-save">Ajouter au journal</button>
+        <label class="btn">Importer .csv<input type="file" id="table-file" accept=".csv,.tsv,text/csv" multiple hidden></label>
+      </div>
+    </div>
+    <div id="table-preview"></div>
+  </section>
+
+  <!-- ===================== COROS ===================== -->
+  <section id="view-coros" class="view">
+    <h2>Données COROS</h2>
+    <div class="card">
+      <h3>1. Import de fichiers (recommandé)</h3>
+      <p class="hint">Depuis l'app ou le site COROS : exporte tes activités en CSV, puis importe-les ici. Les activités sont reconnues automatiquement (format colonnes ou format clé/valeur).</p>
+      <label class="btn primary">Importer CSV COROS<input type="file" id="coros-file" accept=".csv,text/csv" multiple hidden></label>
+      <textarea id="coros-paste" rows="6" placeholder="…ou colle directement le contenu d'un CSV COROS ici"></textarea>
+      <button class="btn" id="coros-parse-paste">Analyser le texte collé</button>
+      <div id="coros-import-report" class="report"></div>
+    </div>
+    <div class="card">
+      <h3>2. API COROS (optionnel)</h3>
+      <p class="hint">L'API officielle COROS nécessite un accès développeur. Renseigne l'URL de ton proxy (voir <code>server.js</code> fourni) et ton jeton d'accès, puis synchronise.</p>
+      <div class="row">
+        <input type="text" id="coros-proxy-url" placeholder="URL du proxy (ex. http://localhost:8787)">
+        <input type="password" id="coros-token" placeholder="Jeton d'accès API">
+      </div>
+      <div class="row">
+        <button class="btn primary" id="coros-sync">Synchroniser les activités</button>
+        <button class="btn" id="coros-save-settings">Enregistrer les réglages</button>
+      </div>
+      <div id="coros-api-report" class="report"></div>
+    </div>
+    <div class="card">
+      <h3>Activités importées</h3>
+      <div id="coros-activities" class="table-wrap"></div>
+    </div>
+  </section>
+
+  <!-- ===================== STATS ===================== -->
+  <section id="view-stats" class="view">
+    <h2>Statistiques</h2>
+    <div class="stat-grid" id="stat-cards"></div>
+    <div class="card">
+      <h3>Kilomètres par semaine (8 dernières semaines)</h3>
+      <div id="chart-weeks"></div>
+    </div>
+  </section>
+
+  <!-- ===================== DONNÉES ===================== -->
+  <section id="view-data" class="view">
+    <h2>Mes données — lisibles et transférables</h2>
+    <div class="card">
+      <p class="hint">Tout est stocké localement dans ton navigateur. Exporte pour sauvegarder, transférer ou réimporter ailleurs.</p>
+      <div class="row">
+        <button class="btn primary" id="export-json">⬇ Export JSON (sauvegarde complète)</button>
+        <button class="btn" id="export-markdown">⬇ Export Markdown</button>
+        <button class="btn" id="export-csv">⬇ Export CSV (activités)</button>
+      </div>
+      <div class="row" style="margin-top:1rem">
+        <label class="btn">⬆ Importer une sauvegarde JSON<input type="file" id="import-json" accept=".json,application/json" hidden></label>
+        <button class="btn danger" id="clear-all">Tout effacer</button>
+      </div>
+      <div id="data-report" class="report"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>Journal Course à Pied · données locales · export JSON / Markdown / CSV</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
