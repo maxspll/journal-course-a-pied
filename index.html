@@ -21,6 +21,7 @@
     <button class="tab" data-view="table">Tableaux</button>
     <button class="tab" data-view="coros">COROS</button>
     <button class="tab" data-view="stats">Stats</button>
+    <button class="tab" data-view="plan">Programme</button>
     <button class="tab" data-view="data">Données</button>
   </nav>
 </header>
@@ -35,6 +36,7 @@
         <button class="chip" data-filter="note">Notes</button>
         <button class="chip" data-filter="table">Tableaux</button>
         <button class="chip" data-filter="activity">Activités</button>
+        <button class="chip" data-filter="plan">Programmes</button>
       </div>
     </div>
     <div id="journal-feed" class="feed"></div>
@@ -130,6 +132,28 @@
       <h3>Comparaison par mois (12 derniers mois)</h3>
       <div id="chart-months"></div>
       <div id="table-months" class="table-wrap" style="margin-top:1rem"></div>
+    </div>
+  </section>
+
+  <!-- ===================== PROGRAMME ===================== -->
+  <section id="view-plan" class="view">
+    <h2>Mon programme</h2>
+    <div class="card">
+      <h3>Importer un programme</h3>
+      <p class="hint">Colle ton programme (une séance par ligne, avec la date) ou importe un fichier .txt / .csv. Exemples de lignes reconnues :<br>
+      « lun 03/11 — Footing 8 km » · « 03/11/2026 : Seuil, 10 km » · « 3 novembre, Sortie longue 90 min »</p>
+      <input type="text" id="plan-name" placeholder="Nom du programme (ex. Semi 2026)">
+      <textarea id="plan-text" rows="8" placeholder="…colle ton programme ici, une séance par ligne…"></textarea>
+      <div class="row">
+        <button class="btn primary" id="plan-import">Ajouter au journal</button>
+        <label class="btn">Importer .txt / .csv<input type="file" id="plan-file" accept=".txt,.csv,text/plain,text/csv" multiple hidden></label>
+      </div>
+      <div id="plan-report" class="report"></div>
+    </div>
+    <div class="card">
+      <h3>Prévu vs réalisé</h3>
+      <p class="hint">Une séance se coche automatiquement dès qu'une course importée (COROS, Strava…) porte la même date. Tu peux aussi cocher/décocher manuellement.</p>
+      <div id="plan-list"></div>
     </div>
   </section>
 

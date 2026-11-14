@@ -53,6 +53,10 @@ function todayISO() {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 
+function toISODate(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
 function fmtDate(v) {
   const d = parseDate(v);
   if (!d) return v || "";
@@ -366,7 +370,7 @@ function renderJournal() {
     feed.innerHTML = '<p class="hint">Aucune entrée. Importe des notes, des tableaux ou des données COROS pour commencer.</p>';
     return;
   }
-  const typeLabels = { note: "Note", table: "Tableau", activity: "Activité COROS" };
+  const typeLabels = { note: "Note", table: "Tableau", activity: "Activité COROS", plan: "Programme" };
   for (const e of entries) {
     const div = document.createElement("article");
     div.className = "entry type-" + e.type;
@@ -375,6 +379,7 @@ function renderJournal() {
     if (e.type === "note") body = `<p class="entry-body">${esc(e.content)}</p>`;
     if (e.type === "table") body = renderHTMLTable(e.table);
     if (e.type === "activity") body = activitySummaryHTML(e.activity);
+    if (e.type === "plan") body = planSummaryHTML(e);
     const tableActions = e.type === "table"
       ? `<button class="btn" data-edit="${e.id}">Modifier</button><button class="btn" data-csv="${e.id}">Export CSV</button>`
       : "";
@@ -684,26 +689,27 @@ function deltaHTML(cur, prev, fmt, lowerIsBetter) {
 }
 
 function periodTable(keys, agg, labelFn) {
-  const headers = ["Période", "Séances", "Distance", "Durée", "Allure moy.", "FC moy.", "D+", "vs période précédente"];
+  const headers = ["Période", "Séances", "Distance", "Durée", "Allure moy.", "FC moy.", "D+"];
+  const cell = (val, delta) => `<td>${val}${delta ? `<span class="cell-delta">${delta}</span>` : ""}</td>`;
   const body = keys.map((k, i) => {
     const g = agg.get(k) || { km: 0, time: 0, dplus: 0, n: 0, hrTime: 0, hrDur: 0 };
     const prev = i > 0 ? (agg.get(keys[i - 1]) || { km: 0, time: 0, hrTime: 0, hrDur: 0 }) : null;
     const pace = g.km > 0 ? g.time / g.km : null;
     const fc = g.hrDur > 0 ? g.hrTime / g.hrDur : null;
-    const dKm = prev ? deltaHTML(g.km, prev.km) + " km" : '<span class="delta-flat">—</span>';
-    const dTime = prev ? deltaHTML(g.time, prev.time) : '<span class="delta-flat">—</span>';
-    const dPace = prev && pace && prev.km > 0 ? deltaHTML(pace, prev.time / prev.km, null, true) : '<span class="delta-flat">—</span>';
-    const dFc = prev && fc && prev.hrDur > 0 ? deltaHTML(fc, prev.hrTime / prev.hrDur, null, true) : '<span class="delta-flat">—</span>';
+    const dKm = prev && (prev.km > 0 || g.km > 0) ? deltaHTML(g.km, prev.km) : "";
+    const dTime = prev && (prev.time > 0 || g.time > 0) ? deltaHTML(g.time, prev.time) : "";
+    const dPace = prev && pace && prev.km > 0 ? deltaHTML(pace, prev.time / prev.km, null, true) : "";
+    const dFc = prev && fc && prev.hrDur > 0 ? deltaHTML(fc, prev.hrTime / prev.hrDur, null, true) : "";
     const cells = [
-      esc(labelFn(k)), String(g.n),
-      g.km > 0 ? g.km.toFixed(1) + " km" : "—",
-      fmtDuration(g.time),
-      fmtPace(pace),
-      fc != null ? Math.round(fc) + " bpm" : "—",
-      g.dplus > 0 ? Math.round(g.dplus) + " m" : "—",
-      `${dKm} · ${dTime} · ${dPace} · ${dFc}`
+      esc(labelFn(k)),
+      String(g.n),
+      [g.km > 0 ? g.km.toFixed(1) + " km" : "—", dKm],
+      [fmtDuration(g.time), dTime],
+      [fmtPace(pace), dPace],
+      [fc != null ? Math.round(fc) + " bpm" : "—", dFc],
+      [g.dplus > 0 ? Math.round(g.dplus) + " m" : "—", ""]
     ];
-    return "<tr>" + cells.map(c => `<td>${c}</td>`).join("") + "</tr>";
+    return "<tr>" + cells.map(c => Array.isArray(c) ? cell(c[0], c[1]) : `<td>${c}</td>`).join("") + "</tr>";
   }).reverse().join("");
   return `<table><thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
 }
@@ -736,20 +742,20 @@ function renderStats() {
   }
 
   const runs = acts.filter(isRunning);
-  const runKm = runs.reduce((s, a) => s + a.distance, 0);
-  const runTime = runs.reduce((s, a) => s + (a.duration || 0), 0);
-  const totalD = acts.reduce((s, a) => s + (a.elevation || 0), 0);
-  const avgPace = runKm > 0 ? runTime / runKm : null;
-  const hrRuns = runs.filter(a => a.hr != null && a.hr > 0 && a.duration > 0);
-  const avgHr = hrRuns.length
-    ? hrRuns.reduce((s, a) => s + a.hr * a.duration, 0) / hrRuns.reduce((s, a) => s + a.duration, 0)
+  const thisWeekISO = toISODate(weekStart(new Date()));
+  const wk = runs.filter(a => { const d = parseDate(a.date); return d && toISODate(weekStart(d)) === thisWeekISO; });
+  const wkKm = wk.reduce((s, a) => s + a.distance, 0);
+  const wkTime = wk.reduce((s, a) => s + (a.duration || 0), 0);
+  const wkHrRuns = wk.filter(a => a.hr != null && a.hr > 0 && a.duration > 0);
+  const wkHr = wkHrRuns.length
+    ? wkHrRuns.reduce((s, a) => s + a.hr * a.duration, 0) / wkHrRuns.reduce((s, a) => s + a.duration, 0)
     : null;
 
   cards.innerHTML = [
-    [fmtPace(avgPace), "Allure moyenne (courses)"],
-    [avgHr != null ? Math.round(avgHr) + " bpm" : "—", "FC moyenne (courses)"],
-    [Math.round(totalD) + " m", "Dénivelé positif"],
-    [acts.length, "Activités"]
+    [wkKm > 0 ? wkKm.toFixed(1) + " km" : "—", "Distance cette semaine"],
+    [wkTime > 0 ? fmtDuration(wkTime) : "—", "Temps cette semaine"],
+    [wkKm > 0 ? fmtPace(wkTime / wkKm) : "—", "Allure moyenne (semaine)"],
+    [wkHr != null ? Math.round(wkHr) + " bpm" : "—", "FC moyenne (semaine)"]
   ].map(([v, l]) => `<div class="stat"><div class="value">${esc(v)}</div><div class="label">${esc(l)}</div></div>`).join("");
 
   const thisMonday = weekStart(new Date());
@@ -757,11 +763,11 @@ function renderStats() {
   for (let i = 11; i >= 0; i--) {
     const d = new Date(thisMonday);
     d.setDate(d.getDate() - i * 7);
-    weekKeys.push(d.toISOString().slice(0, 10));
+    weekKeys.push(toISODate(d));
   }
   const weekAgg = aggregateBy(acts.filter(isRunning), a => {
     const d = parseDate(a.date);
-    return d ? weekStart(d).toISOString().slice(0, 10) : null;
+    return d ? toISODate(weekStart(d)) : null;
   });
   const weekLabel = k => {
     const start = new Date(k + "T00:00:00");
@@ -888,6 +894,255 @@ function setupData() {
   });
 }
 
+/* ---------------- Programme (plan d'entraînement) ---------------- */
+
+const MONTHS_FR = {
+  "janv": 0, "jan": 0, "janvier": 0,
+  "fevr": 1, "fev": 1, "févr": 1, "fév": 1, "février": 1, "fevrier": 1,
+  "mars": 2, "mar": 2,
+  "avr": 3, "avril": 3,
+  "mai": 4,
+  "juin": 5, "jun": 5,
+  "juil": 6, "juill": 6, "jul": 6, "juillet": 6,
+  "aout": 7, "août": 7,
+  "sept": 8, "sep": 8, "septembre": 8,
+  "oct": 9, "octobre": 9,
+  "nov": 10, "novembre": 10,
+  "dec": 11, "déc": 11, "décembre": 11, "decembre": 11
+};
+
+function parsePlanLine(line, today) {
+  const s = line.trim();
+  if (!s) return null;
+  let d = null, rest = s, m;
+  m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    d = new Date(+m[1], +m[2] - 1, +m[3]);
+    rest = s.slice(0, m.index) + " " + s.slice(m.index + m[0].length);
+  }
+  if (!d) {
+    m = s.match(/(\d{1,2})(?:er)?\s*[/.–-]\s*(\d{1,2})(?:\s*[/.–-]\s*(\d{2,4}))?/);
+    if (m) {
+      const day = +m[1], mon = +m[2];
+      if (day >= 1 && day <= 31 && mon >= 1 && mon <= 12) {
+        let year = m[3] ? +m[3] : today.getFullYear();
+        if (year < 100) year += 2000;
+        d = new Date(year, mon - 1, day);
+        if (!m[3] && d < new Date(today.getFullYear(), today.getMonth(), today.getDate() - 180)) {
+          d = new Date(year + 1, mon - 1, day);
+        }
+        rest = s.slice(0, m.index) + " " + s.slice(m.index + m[0].length);
+      }
+    }
+  }
+  if (!d) {
+    m = s.match(/(\d{1,2})(?:er)?\s+(?:[a-zéûôàèù0-9'.’-]+\s+)?(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|janv|févr|fevr|fév|fev|avr|juin|juil|juill|sept|oct|nov|déc|dec)\b/i);
+    if (m) {
+      const mon = MONTHS_FR[m[2].toLowerCase().replace(".", "")];
+      if (mon != null) {
+        d = new Date(today.getFullYear(), mon, +m[1]);
+        if (d < new Date(today.getFullYear(), today.getMonth(), today.getDate() - 180)) {
+          d = new Date(today.getFullYear() + 1, mon, +m[1]);
+        }
+        rest = s.slice(0, m.index) + " " + s.slice(m.index + m[0].length);
+      }
+    }
+  }
+  if (!d) return null;
+  let km = null;
+  const kmMatch = rest.match(/(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:km|kms|k)\b/i);
+  if (kmMatch) {
+    km = parseFloat(kmMatch[1].replace(",", "."));
+    rest = rest.slice(0, kmMatch.index) + " " + rest.slice(kmMatch.index + kmMatch[0].length);
+  }
+  const label = rest.replace(/[\s–—:·,;|]+/g, " ").trim().replace(/\s+/g, " ");
+  return {
+    date: toISODate(d),
+    label: label || "Séance",
+    km: km != null && km > 0 && km < 500 ? km : null,
+    done: false, doneId: null, manual: false
+  };
+}
+
+function parsePlanText(text) {
+  const today = new Date();
+  const sessions = [];
+  let skipped = 0;
+  for (const line of String(text).split(/\r?\n/)) {
+    const sess = parsePlanLine(line, today);
+    if (sess) sessions.push(sess);
+    else if (line.trim()) skipped++;
+  }
+  sessions.sort((a, b) => a.date.localeCompare(b.date));
+  return { sessions, skipped };
+}
+
+function planSummaryHTML(e) {
+  const total = e.sessions.length;
+  const done = e.sessions.filter(s => s.done).length;
+  const km = e.sessions.reduce((s, x) => s + (x.km || 0), 0);
+  return `<p class="entry-body">${done}/${total} séances faites${km ? " · " + km.toFixed(1) + " km prévus" : ""}</p>`;
+}
+
+function findSessionActivity(s) {
+  if (s.doneId) {
+    const en = state.entries.find(x => x.type === "activity" && x.id === s.doneId);
+    if (en) return en.activity;
+  }
+  const en = state.entries.find(x => {
+    if (x.type !== "activity" || !x.activity) return false;
+    const d = parseDate(x.activity.date);
+    return d && toISODate(d) === s.date && isRunning(x.activity);
+  });
+  return en ? en.activity : null;
+}
+
+function autoCheckPlan() {
+  let changed = false;
+  const acts = state.entries.filter(e => e.type === "activity").map(e => e.activity);
+  for (const e of state.entries.filter(x => x.type === "plan")) {
+    for (const s of e.sessions) {
+      if (s.manual) continue;
+      const match = acts.find(a => {
+        const d = parseDate(a.date);
+        return d && toISODate(d) === s.date && isRunning(a);
+      });
+      const newDone = !!match;
+      const newId = match ? match.id : null;
+      if (s.done !== newDone || (s.doneId || null) !== newId) {
+        s.done = newDone;
+        s.doneId = newId;
+        changed = true;
+      }
+    }
+  }
+  if (changed) save();
+}
+
+function renderPlan() {
+  const wrap = document.getElementById("plan-list");
+  if (!wrap) return;
+  const plans = sortedEntries().filter(e => e.type === "plan");
+  if (!plans.length) {
+    wrap.innerHTML = '<p class="hint">Aucun programme importé. Colle ton programme ci-dessus ou importe un fichier .txt / .csv, une séance par ligne avec sa date.</p>';
+    return;
+  }
+  wrap.innerHTML = "";
+  for (const e of plans) {
+    const card = document.createElement("div");
+    card.className = "card plan-card";
+    const byWeek = new Map();
+    e.sessions.forEach((s, idx) => {
+      const d = parseDate(s.date);
+      const k = d ? toISODate(weekStart(d)) : "—";
+      if (!byWeek.has(k)) byWeek.set(k, []);
+      byWeek.get(k).push({ s, idx });
+    });
+    let html = `
+      <div class="entry-head">
+        <div><p class="entry-title">${esc(e.title || "Programme")}</p>
+        <span class="entry-meta">${e.sessions.length} séances · ${e.sessions.filter(s => s.done).length} faites</span></div>
+        <div class="entry-actions">
+          <button class="btn" data-precheck="${e.id}">Revérifier les séances faites</button>
+          <button class="btn danger" data-pdel="${e.id}">Supprimer</button>
+        </div>
+      </div>`;
+    for (const [wk, list] of [...byWeek.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const kmPrev = list.reduce((s, x) => s + (x.s.km || 0), 0);
+      let kmFait = 0, nFait = 0;
+      for (const x of list) {
+        const act = findSessionActivity(x.s);
+        if (x.s.done && act && act.distance != null) { kmFait += act.distance; nFait++; }
+      }
+      const start = new Date(wk + "T00:00:00");
+      const end = new Date(start); end.setDate(end.getDate() + 6);
+      const opts = { day: "numeric", month: "short" };
+      html += `<p class="plan-week">Semaine du ${start.toLocaleDateString("fr-FR", opts)} au ${end.toLocaleDateString("fr-FR", opts)} — prévu ${kmPrev ? kmPrev.toFixed(1) + " km" : "—"} · réalisé ${kmFait ? kmFait.toFixed(1) + " km" : "—"} · ${nFait}/${list.length} séances</p>`;
+      html += '<div class="table-wrap"><table><thead><tr><th>Fait</th><th>Date</th><th>Séance prévue</th><th>Prévu</th><th>Réalisé</th><th>Écart</th></tr></thead><tbody>';
+      for (const x of list) {
+        const act = findSessionActivity(x.s);
+        const real = act ? (act.distance != null ? act.distance.toFixed(1) + " km" : fmtDuration(act.duration)) : "";
+        const ecart = act && act.distance != null && x.s.km != null
+          ? (act.distance - x.s.km > 0 ? "+" : "") + (act.distance - x.s.km).toFixed(1) + " km"
+          : "";
+        html += `<tr class="${x.s.done ? "session-done" : ""}">
+          <td><button class="check-btn" data-ptoggle="${e.id}:${x.idx}" aria-label="Cocher la séance">${x.s.done ? "✓" : ""}</button></td>
+          <td>${esc(fmtDate(x.s.date))}</td>
+          <td>${esc(x.s.label)}</td>
+          <td>${x.s.km != null ? x.s.km.toFixed(1) + " km" : "—"}</td>
+          <td>${act ? esc((act.title || "Séance") + (real ? " · " + real : "")) : '<span class="delta-flat">—</span>'}</td>
+          <td>${ecart ? esc(ecart) : ""}</td>
+        </tr>`;
+      }
+      html += "</tbody></table></div>";
+    }
+    card.innerHTML = html;
+    wrap.appendChild(card);
+  }
+}
+
+function importPlanText(text, name, report) {
+  const { sessions, skipped } = parsePlanText(text);
+  if (!sessions.length) {
+    report.textContent = "Aucune séance trouvée. Chaque ligne doit contenir une date (ex. « 03/11 Footing 8 km » ou « 3 novembre, sortie longue 90 min »).";
+    report.classList.add("error");
+    return;
+  }
+  report.classList.remove("error");
+  state.entries.push({
+    id: uid(), type: "plan", date: todayISO(),
+    title: name || "Programme",
+    sessions
+  });
+  save();
+  autoCheckPlan();
+  renderAll();
+  report.textContent = `Programme importé : ${sessions.length} séance(s)${skipped ? `, ${skipped} ligne(s) ignorée(s) (sans date)` : ""}. Les séances déjà réalisées sont cochées automatiquement.`;
+}
+
+function setupPlan() {
+  document.getElementById("plan-import").addEventListener("click", () => {
+    importPlanText(document.getElementById("plan-text").value, document.getElementById("plan-name").value.trim(), document.getElementById("plan-report"));
+  });
+  document.getElementById("plan-file").addEventListener("change", async ev => {
+    const files = [...ev.target.files];
+    ev.target.value = "";
+    const report = document.getElementById("plan-report");
+    if (!files.length) return;
+    let text = "";
+    for (const f of files) text += (await f.text()) + "\n";
+    importPlanText(text, files[0].name.replace(/\.[^.]+$/, ""), report);
+  });
+  document.getElementById("plan-list").addEventListener("click", ev => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+    if (btn.dataset.ptoggle) {
+      const [pid, idx] = btn.dataset.ptoggle.split(":");
+      const e = state.entries.find(x => x.id === pid);
+      const s = e && e.sessions[+idx];
+      if (!s) return;
+      s.manual = true;
+      s.done = !s.done;
+      s.doneId = s.done ? (findSessionActivity(s) || {}).id || null : null;
+      save();
+      renderPlan();
+      renderJournal();
+    } else if (btn.dataset.pdel) {
+      if (!confirm("Supprimer ce programme ?")) return;
+      state.entries = state.entries.filter(x => x.id !== btn.dataset.pdel);
+      save();
+      renderAll();
+    } else if (btn.dataset.precheck) {
+      const e = state.entries.find(x => x.id === btn.dataset.precheck);
+      if (!e) return;
+      for (const s of e.sessions) s.manual = false;
+      autoCheckPlan();
+      renderPlan();
+      renderJournal();
+    }
+  });
+}
+
 /* ---------------- Navigation ---------------- */
 
 function switchView(name) {
@@ -897,9 +1152,11 @@ function switchView(name) {
 }
 
 function renderAll() {
+  autoCheckPlan();
   renderJournal();
   renderActivitiesTable();
   renderStats();
+  renderPlan();
 }
 
 function setup() {
@@ -951,6 +1208,7 @@ function setup() {
   setupTables();
   setupCoros();
   setupData();
+  setupPlan();
   renderAll();
 }
 
