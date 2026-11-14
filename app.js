@@ -640,25 +640,95 @@ function runningActivities() {
     .filter(a => a.distance != null && a.distance > 0);
 }
 
+function weekStart(d) {
+  const t = new Date(d);
+  t.setHours(0, 0, 0, 0);
+  t.setDate(t.getDate() - ((t.getDay() + 6) % 7));
+  return t;
+}
+
+function aggregateBy(acts, keyFn) {
+  const map = new Map();
+  for (const a of acts) {
+    const k = keyFn(a);
+    if (!k) continue;
+    if (!map.has(k)) map.set(k, { km: 0, time: 0, dplus: 0, n: 0 });
+    const g = map.get(k);
+    g.km += a.distance || 0;
+    g.time += a.duration || 0;
+    g.dplus += a.elevation || 0;
+    g.n++;
+  }
+  return map;
+}
+
+function deltaHTML(cur, prev, fmt, lowerIsBetter) {
+  if (!prev && !cur) return '<span class="delta-flat">—</span>';
+  if (!prev) return '<span class="delta-up">nouveau</span>';
+  if (!cur) return '<span class="delta-flat">0</span>';
+  const pct = ((cur - prev) / prev) * 100;
+  if (Math.abs(pct) < 0.5) return '<span class="delta-flat">=</span>';
+  const up = pct > 0;
+  const good = lowerIsBetter ? !up : up;
+  const cls = good ? "delta-up" : "delta-down";
+  const arrow = up ? "▲" : "▼";
+  return `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(0)} %</span>`;
+}
+
+function periodTable(keys, agg, labelFn) {
+  const headers = ["Période", "Séances", "Distance", "Durée", "Allure moy.", "D+", "vs période précédente"];
+  const body = keys.map((k, i) => {
+    const g = agg.get(k) || { km: 0, time: 0, dplus: 0, n: 0 };
+    const prev = i > 0 ? (agg.get(keys[i - 1]) || { km: 0, time: 0 }) : null;
+    const pace = g.km > 0 ? g.time / g.km : null;
+    const dKm = prev ? deltaHTML(g.km, prev.km) + " km" : '<span class="delta-flat">—</span>';
+    const dTime = prev ? deltaHTML(g.time, prev.time) : '<span class="delta-flat">—</span>';
+    const dPace = prev && pace && prev.km > 0 ? deltaHTML(pace, prev.time / prev.km, null, true) : '<span class="delta-flat">—</span>';
+    const cells = [
+      esc(labelFn(k)), String(g.n),
+      g.km > 0 ? g.km.toFixed(1) + " km" : "—",
+      fmtDuration(g.time),
+      fmtPace(pace),
+      g.dplus > 0 ? Math.round(g.dplus) + " m" : "—",
+      `${dKm} · ${dTime} · ${dPace}`
+    ];
+    return "<tr>" + cells.map(c => `<td>${c}</td>`).join("") + "</tr>";
+  }).reverse().join("");
+  return `<table><thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function barChart(keys, agg, labelFn) {
+  const values = keys.map(k => (agg.get(k) || { km: 0 }).km);
+  const max = Math.max(...values, 1);
+  return '<div class="chart">' + keys.map((k, i) => `
+    <div class="bar-group">
+      <span class="bar-value">${values[i] > 0 ? values[i].toFixed(1) : ""}</span>
+      <div class="bar" style="height:${Math.max(2, (values[i] / max) * 100)}%"></div>
+      <span class="bar-label">${labelFn(k)}</span>
+    </div>`).join("") + "</div>";
+}
+
 function renderStats() {
   const acts = runningActivities();
   const cards = document.getElementById("stat-cards");
-  const chart = document.getElementById("chart-weeks");
+  const chartWeeks = document.getElementById("chart-weeks");
+  const tableWeeks = document.getElementById("table-weeks");
+  const chartMonths = document.getElementById("chart-months");
+  const tableMonths = document.getElementById("table-months");
   if (!acts.length) {
     cards.innerHTML = '<p class="hint">Importe des activités COROS pour voir tes statistiques.</p>';
-    chart.innerHTML = "";
+    chartWeeks.innerHTML = "";
+    tableWeeks.innerHTML = "";
+    chartMonths.innerHTML = "";
+    tableMonths.innerHTML = "";
     return;
   }
+
   const totalKm = acts.reduce((s, a) => s + a.distance, 0);
   const totalTime = acts.reduce((s, a) => s + (a.duration || 0), 0);
   const totalD = acts.reduce((s, a) => s + (a.elevation || 0), 0);
   const avgPace = totalTime > 0 ? totalTime / totalKm : null;
   const bestPace = Math.min(...acts.filter(a => a.pace).map(a => a.pace));
-
-  const weekKey = d => { const dt = parseDate(d); if (!dt) return null; const t = new Date(dt); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); return t.toISOString().slice(0, 10); };
-  const weeks = {};
-  for (const a of acts) { const k = weekKey(a.date); if (k) weeks[k] = (weeks[k] || 0) + a.distance; }
-  const lastWeeks = Object.keys(weeks).sort().slice(-8);
 
   cards.innerHTML = [
     [totalKm.toFixed(1) + " km", "Distance totale"],
@@ -669,13 +739,51 @@ function renderStats() {
     [acts.length, "Activités"]
   ].map(([v, l]) => `<div class="stat"><div class="value">${esc(v)}</div><div class="label">${esc(l)}</div></div>`).join("");
 
-  const max = Math.max(...lastWeeks.map(k => weeks[k]), 1);
-  chart.innerHTML = '<div class="chart">' + lastWeeks.map(k => `
-    <div class="bar-group">
-      <span class="bar-value">${weeks[k].toFixed(1)}</span>
-      <div class="bar" style="height:${Math.max(2, (weeks[k] / max) * 100)}%"></div>
-      <span class="bar-label">${k.slice(8)}/${k.slice(5, 7)}</span>
-    </div>`).join("") + "</div>";
+  const thisMonday = weekStart(new Date());
+  const weekKeys = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(thisMonday);
+    d.setDate(d.getDate() - i * 7);
+    weekKeys.push(d.toISOString().slice(0, 10));
+  }
+  const weekAgg = aggregateBy(acts, a => {
+    const d = parseDate(a.date);
+    return d ? weekStart(d).toISOString().slice(0, 10) : null;
+  });
+  const weekLabel = k => {
+    const start = new Date(k + "T00:00:00");
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    const opts = { day: "numeric", month: "short" };
+    return start.toLocaleDateString("fr-FR", opts) + " – " + end.toLocaleDateString("fr-FR", opts);
+  };
+  chartWeeks.innerHTML = barChart(weekKeys, weekAgg, k => {
+    const start = new Date(k + "T00:00:00");
+    return start.getDate() + "/" + String(start.getMonth() + 1).padStart(2, "0");
+  });
+  tableWeeks.innerHTML = periodTable(weekKeys, weekAgg, weekLabel);
+
+  const monthKeys = [];
+  const now = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    monthKeys.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
+  }
+  const monthAgg = aggregateBy(acts, a => {
+    const d = parseDate(a.date);
+    if (!d) return null;
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  });
+  const monthLabel = k => {
+    const [y, m] = k.split("-");
+    return new Date(+y, +m - 1, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  };
+  const monthShort = k => {
+    const [y, m] = k.split("-");
+    return new Date(+y, +m - 1, 1).toLocaleDateString("fr-FR", { month: "short" });
+  };
+  chartMonths.innerHTML = barChart(monthKeys, monthAgg, monthShort);
+  tableMonths.innerHTML = periodTable(monthKeys, monthAgg, monthLabel);
 }
 
 /* ---------------- Export / Import ---------------- */

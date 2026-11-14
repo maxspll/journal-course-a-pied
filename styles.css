@@ -138,6 +138,10 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.02); }
 .stat .value { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
 .stat .label { color: var(--muted); font-size: .8rem; }
 
+.delta-up { color: var(--accent-2); font-weight: 600; }
+.delta-down { color: var(--danger); font-weight: 600; }
+.delta-flat { color: var(--muted); }
+
 table.editing th, table.editing td {
   background: rgba(255, 209, 102, .06);
   outline: 1px dashed rgba(255, 209, 102, .35);
