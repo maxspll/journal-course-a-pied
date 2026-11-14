@@ -95,6 +95,20 @@
       <div id="coros-api-report" class="report"></div>
     </div>
     <div class="card">
+      <h3>3. Synchronisation Strava (COROS → Strava → webapp)</h3>
+      <p class="hint">Dans l'app COROS : Réglages → Connexions → relie ton compte Strava. Crée ensuite une app API gratuite sur <code>strava.com/settings/api</code> (Callback Domain : <code>localhost</code>), colle tes identifiants ici, et lance le proxy (<code>node server.js</code>). Tes courses arriveront automatiquement.</p>
+      <div class="row">
+        <input type="text" id="strava-client-id" placeholder="Client ID Strava">
+        <input type="password" id="strava-client-secret" placeholder="Client Secret Strava">
+      </div>
+      <div class="row">
+        <button class="btn" id="strava-save">Enregistrer les réglages</button>
+        <button class="btn primary" id="strava-connect">Connecter mon compte Strava</button>
+        <button class="btn primary" id="strava-sync">Synchroniser les activités</button>
+      </div>
+      <div id="strava-report" class="report"></div>
+    </div>
+    <div class="card">
       <h3>Activités importées</h3>
       <div id="coros-activities" class="table-wrap"></div>
     </div>

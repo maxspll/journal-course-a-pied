@@ -27,7 +27,7 @@ python3 -m http.server 8080
 |---|---|
 | **Journal** | Fil chronologique de tout : notes, tableaux, activités COROS. Recherche + filtres. |
 | **Notes** | Saisie libre ou import de fichiers `.txt` / `.md` → arrivent dans le Journal. |
-| **Tableaux** | Colle un tableau (CSV `,` `;` ou tabulation) ou importe un `.csv` → tableau lisible dans le Journal. |
+| **Tableaux** | Colle un tableau (CSV `,` `;` ou tabulation) ou importe un `.csv` → tableau lisible dans le Journal. Chaque tableau est **modifiable** (bouton « Modifier » : cellules éditables, ajout de lignes/colonnes) et **exportable en CSV** vers Numbers/Excel. |
 | **COROS** | Import de CSV COROS (format colonnes **ou** clé/valeur) + synchronisation API optionnelle. |
 | **Stats** | Distance totale, temps, allure moyenne/meilleure, D+, km par semaine (graphique). |
 | **Données** | Export JSON (sauvegarde complète), Markdown, CSV activités + import de sauvegarde. |
@@ -48,7 +48,20 @@ elle manque.
 
 Un fichier d'exemple est fourni : `exemple-coros.csv`.
 
-### 2. API COROS (optionnel)
+### 2. Synchronisation automatique via Strava (recommandé pour l'automatique)
+
+L'API officielle COROS est réservée aux partenaires approuvés. La voie ouverte
+aux particuliers passe par Strava :
+
+1. Dans l'app COROS : **Réglages → Connexions → Strava** (transfert automatique de chaque activité)
+2. Crée une app API gratuite sur [strava.com/settings/api](https://www.strava.com/settings/api) — Callback Domain : `localhost`
+3. Lance le proxy : `node server.js`
+4. Dans la webapp, onglet **COROS** → section 3 : colle ton **Client ID** et **Client Secret**, enregistre, puis « Connecter mon compte Strava » et « Synchroniser »
+
+Tes activités Strava (donc COROS) arrivent directement dans le Journal. Les
+jetons restent dans `tokens.json` sur ta machine (ignoré par git).
+
+### 3. API COROS (optionnel)
 
 L'API officielle nécessite un accès développeur validé par COROS
 (https://open.coros.com). Une fois obtenu :
