@@ -640,6 +640,10 @@ function runningActivities() {
     .filter(a => a.distance != null && a.distance > 0);
 }
 
+function isRunning(a) {
+  return /course|run|trail/i.test(a.type || "");
+}
+
 function weekStart(d) {
   const t = new Date(d);
   t.setHours(0, 0, 0, 0);
@@ -652,12 +656,16 @@ function aggregateBy(acts, keyFn) {
   for (const a of acts) {
     const k = keyFn(a);
     if (!k) continue;
-    if (!map.has(k)) map.set(k, { km: 0, time: 0, dplus: 0, n: 0 });
+    if (!map.has(k)) map.set(k, { km: 0, time: 0, dplus: 0, n: 0, hrTime: 0, hrDur: 0 });
     const g = map.get(k);
     g.km += a.distance || 0;
     g.time += a.duration || 0;
     g.dplus += a.elevation || 0;
     g.n++;
+    if (a.hr != null && a.hr > 0 && a.duration > 0) {
+      g.hrTime += a.hr * a.duration;
+      g.hrDur += a.duration;
+    }
   }
   return map;
 }
@@ -676,21 +684,24 @@ function deltaHTML(cur, prev, fmt, lowerIsBetter) {
 }
 
 function periodTable(keys, agg, labelFn) {
-  const headers = ["Période", "Séances", "Distance", "Durée", "Allure moy.", "D+", "vs période précédente"];
+  const headers = ["Période", "Séances", "Distance", "Durée", "Allure moy.", "FC moy.", "D+", "vs période précédente"];
   const body = keys.map((k, i) => {
-    const g = agg.get(k) || { km: 0, time: 0, dplus: 0, n: 0 };
-    const prev = i > 0 ? (agg.get(keys[i - 1]) || { km: 0, time: 0 }) : null;
+    const g = agg.get(k) || { km: 0, time: 0, dplus: 0, n: 0, hrTime: 0, hrDur: 0 };
+    const prev = i > 0 ? (agg.get(keys[i - 1]) || { km: 0, time: 0, hrTime: 0, hrDur: 0 }) : null;
     const pace = g.km > 0 ? g.time / g.km : null;
+    const fc = g.hrDur > 0 ? g.hrTime / g.hrDur : null;
     const dKm = prev ? deltaHTML(g.km, prev.km) + " km" : '<span class="delta-flat">—</span>';
     const dTime = prev ? deltaHTML(g.time, prev.time) : '<span class="delta-flat">—</span>';
     const dPace = prev && pace && prev.km > 0 ? deltaHTML(pace, prev.time / prev.km, null, true) : '<span class="delta-flat">—</span>';
+    const dFc = prev && fc && prev.hrDur > 0 ? deltaHTML(fc, prev.hrTime / prev.hrDur, null, true) : '<span class="delta-flat">—</span>';
     const cells = [
       esc(labelFn(k)), String(g.n),
       g.km > 0 ? g.km.toFixed(1) + " km" : "—",
       fmtDuration(g.time),
       fmtPace(pace),
+      fc != null ? Math.round(fc) + " bpm" : "—",
       g.dplus > 0 ? Math.round(g.dplus) + " m" : "—",
-      `${dKm} · ${dTime} · ${dPace}`
+      `${dKm} · ${dTime} · ${dPace} · ${dFc}`
     ];
     return "<tr>" + cells.map(c => `<td>${c}</td>`).join("") + "</tr>";
   }).reverse().join("");
@@ -724,17 +735,19 @@ function renderStats() {
     return;
   }
 
-  const totalKm = acts.reduce((s, a) => s + a.distance, 0);
-  const totalTime = acts.reduce((s, a) => s + (a.duration || 0), 0);
+  const runs = acts.filter(isRunning);
+  const runKm = runs.reduce((s, a) => s + a.distance, 0);
+  const runTime = runs.reduce((s, a) => s + (a.duration || 0), 0);
   const totalD = acts.reduce((s, a) => s + (a.elevation || 0), 0);
-  const avgPace = totalTime > 0 ? totalTime / totalKm : null;
-  const bestPace = Math.min(...acts.filter(a => a.pace).map(a => a.pace));
+  const avgPace = runKm > 0 ? runTime / runKm : null;
+  const hrRuns = runs.filter(a => a.hr != null && a.hr > 0 && a.duration > 0);
+  const avgHr = hrRuns.length
+    ? hrRuns.reduce((s, a) => s + a.hr * a.duration, 0) / hrRuns.reduce((s, a) => s + a.duration, 0)
+    : null;
 
   cards.innerHTML = [
-    [totalKm.toFixed(1) + " km", "Distance totale"],
-    [fmtDuration(totalTime), "Temps total"],
-    [fmtPace(avgPace), "Allure moyenne"],
-    [fmtPace(bestPace), "Meilleure allure"],
+    [fmtPace(avgPace), "Allure moyenne (courses)"],
+    [avgHr != null ? Math.round(avgHr) + " bpm" : "—", "FC moyenne (courses)"],
     [Math.round(totalD) + " m", "Dénivelé positif"],
     [acts.length, "Activités"]
   ].map(([v, l]) => `<div class="stat"><div class="value">${esc(v)}</div><div class="label">${esc(l)}</div></div>`).join("");
@@ -746,7 +759,7 @@ function renderStats() {
     d.setDate(d.getDate() - i * 7);
     weekKeys.push(d.toISOString().slice(0, 10));
   }
-  const weekAgg = aggregateBy(acts, a => {
+  const weekAgg = aggregateBy(acts.filter(isRunning), a => {
     const d = parseDate(a.date);
     return d ? weekStart(d).toISOString().slice(0, 10) : null;
   });
@@ -769,7 +782,7 @@ function renderStats() {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     monthKeys.push(d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"));
   }
-  const monthAgg = aggregateBy(acts, a => {
+  const monthAgg = aggregateBy(acts.filter(isRunning), a => {
     const d = parseDate(a.date);
     if (!d) return null;
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
