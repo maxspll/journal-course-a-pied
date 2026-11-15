@@ -1255,6 +1255,24 @@ function importPlanText(text, name, report) {
 }
 
 function setupPlan() {
+  const ta = document.getElementById("plan-text");
+  const preview = document.getElementById("plan-preview");
+  const showPreview = () => {
+    preview.innerHTML = "";
+    if (!ta.value.trim()) return;
+    const { sessions, skipped } = parsePlanText(ta.value);
+    if (!sessions.length) {
+      preview.innerHTML = '<p class="hint">Aucune séance reconnue pour le moment. Vérifie qu’il y a des en-têtes « Semaine … » ou des dates (ex. « 03/11 », « 3 novembre »).</p>';
+      preview.classList.add("error");
+      return;
+    }
+    preview.classList.remove("error");
+    const weeks = [...new Set(sessions.map(s => s.week || s.date))];
+    const sample = sessions.slice(0, 8).map(s =>
+      `<li>${s.date ? esc(fmtDate(s.date)) : "à planifier"} — ${esc(s.label)}${s.km != null ? " (" + s.km + " km)" : ""}</li>`).join("");
+    preview.innerHTML = `<p><strong>${sessions.length} séance(s) reconnue(s)</strong> dans ${weeks.length} semaine(s)${skipped ? " · " + skipped + " ligne(s) ignorée(s)" : ""}</p><ul class="plan-preview-list">${sample}</ul>${sessions.length > 8 ? '<p class="hint">…</p>' : ""}`;
+  };
+  ta.addEventListener("input", showPreview);
   document.getElementById("plan-import").addEventListener("click", () => {
     importPlanText(document.getElementById("plan-text").value, document.getElementById("plan-name").value.trim(), document.getElementById("plan-report"));
   });
