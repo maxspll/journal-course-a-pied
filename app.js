@@ -940,14 +940,38 @@ function extractKm(text) {
   const parRe = /\(([^)]*)\)/g;
   let pm;
   while ((pm = parRe.exec(text))) {
-    const m = pm[1].match(/(\d{1,3}(?:[.,]\d{1,2})?)\s*km?\b/i);
+    const m = pm[1].match(/(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:kms|km|k)\b/i);
     if (m) km = parseFloat(m[1].replace(",", "."));
   }
   if (km == null) {
-    const m = text.match(/(\d{1,3}(?:[.,]\d{1,2})?)\s*km?\b/i);
+    const m = text.match(/(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:kms|km|k)\b/i);
     if (m) km = parseFloat(m[1].replace(",", "."));
   }
   return km != null && km > 0 && km < 500 ? km : null;
+}
+
+function extractDuration(text) {
+  let best = null;
+  const hRe = /(\d{1,2})\s*h(\d{1,2})?(?!\d)/gi;
+  let m;
+  while ((m = hRe.exec(text))) {
+    const sec = (+m[1]) * 3600 + (m[2] ? +m[2] * 60 : 0);
+    if (sec > 0 && (best == null || sec > best)) best = sec;
+  }
+  const minRe = /(\d{1,3})\s*(?:min|minutes)\b/gi;
+  while ((m = minRe.exec(text))) {
+    const sec = +m[1] * 60;
+    if (sec > 0 && (best == null || sec > best)) best = sec;
+  }
+  return best;
+}
+
+function fmtDurShort(sec) {
+  if (!sec) return "\u2014";
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  if (h && m) return h + "h" + String(m).padStart(2, "0");
+  if (h) return h + "h";
+  return m + " min";
 }
 
 function parseDayMonth(text, today) {
@@ -985,11 +1009,12 @@ function parseDateRange(text, today) {
   return { start, end };
 }
 
-function mkSession(date, week, label, km) {
+function mkSession(date, week, label, km, dur) {
   return {
     date, week,
     label: label || "S\u00e9ance",
     km: km != null && km > 0 && km < 500 ? km : null,
+    dur: dur != null && dur > 0 && dur < 86400 ? dur : null,
     done: false, doneId: null, manual: false
   };
 }
@@ -1036,7 +1061,7 @@ function parsePlanLine(line, today, week) {
     }
   }
   if (!d) return null;
-  return mkSession(toISODate(d), week || toISODate(weekStart(d)), cleanLabel(rest), extractKm(rest));
+  return mkSession(toISODate(d), week || toISODate(weekStart(d)), cleanLabel(rest), extractKm(rest), extractDuration(rest));
 }
 
 function parsePlanText(text) {
@@ -1068,7 +1093,7 @@ function parsePlanText(text) {
       cursor = toISODate(next);
       continue;
     }
-    const rep = line.match(/^(\d{1,2})\s*x\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*km?\b/i);
+    const rep = line.match(/^(\d{1,2})\s*x\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:kms|km|k)\b/i);
     if (rep) {
       if (!week) { skipped++; continue; }
       const n = +rep[1];
@@ -1086,7 +1111,7 @@ function parsePlanText(text) {
         const unit = addKm[2].toLowerCase();
         km = parseFloat(addKm[1].replace(",", ".")) * (unit === "km" ? 1 : 0.001);
       }
-      sessions.push(mkSession(null, week, cleanLabel(line), km));
+      sessions.push(mkSession(null, week, cleanLabel(line), km, extractDuration(line)));
       continue;
     }
     const dated = parsePlanLine(line, today, week);
@@ -1097,7 +1122,7 @@ function parsePlanText(text) {
       if (sessions.length && sessions[sessions.length - 1].label === "S\u00e9ance") {
         sessions[sessions.length - 1].label = label || "S\u00e9ance";
       } else {
-        sessions.push(mkSession(null, week, label, km));
+        sessions.push(mkSession(null, week, label, km, extractDuration(line)));
       }
       continue;
     }
@@ -1150,7 +1175,7 @@ function autoCheckPlan() {
       }
     }
     for (const s of e.sessions) {
-      if (s.manual || s.date || s.km == null || !s.week) continue;
+      if (s.manual || s.date || (s.km == null && !s.dur) || !s.week) continue;
       const match = acts.find(a => {
         if (used.has(a.id) || !isRunning(a)) return false;
         const d = parseDate(a.date);
@@ -1159,7 +1184,8 @@ function autoCheckPlan() {
         const wen = new Date(ws);
         wen.setDate(wen.getDate() + 6);
         if (d < ws || d > wen) return false;
-        return Math.abs(a.distance - s.km) <= Math.max(0.8, s.km * 0.15);
+        if (s.km != null) return Math.abs(a.distance - s.km) <= Math.max(0.8, s.km * 0.15);
+        return a.duration > 0 && Math.abs(a.duration - s.dur) <= Math.max(300, s.dur * 0.20);
       });
       const newDone = !!match;
       const newId = match ? match.id : null;
@@ -1203,19 +1229,27 @@ function renderPlan() {
       </div>`;
     for (const [wk, list] of [...byWeek.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       const kmPrev = list.reduce((s, x) => s + (x.s.km || 0), 0);
-      let kmFait = 0, nFait = 0;
+      const durPrev = list.reduce((s, x) => s + (x.s.dur || 0), 0);
+      let kmFait = 0, durFait = 0, nFait = 0;
       for (const x of list) {
         const act = findSessionActivity(x.s);
-        if (x.s.done && act && act.distance != null) { kmFait += act.distance; nFait++; }
+        if (x.s.done && act) {
+          nFait++;
+          if (act.distance != null) kmFait += act.distance;
+          if (act.duration != null) durFait += act.duration;
+        }
       }
       const start = new Date(wk + "T00:00:00");
       const end = new Date(start); end.setDate(end.getDate() + 6);
       const opts = { day: "numeric", month: "short" };
-      html += `<p class="plan-week">Semaine du ${start.toLocaleDateString("fr-FR", opts)} au ${end.toLocaleDateString("fr-FR", opts)} — prévu ${kmPrev ? kmPrev.toFixed(1) + " km" : "—"} · réalisé ${kmFait ? kmFait.toFixed(1) + " km" : "—"} · ${nFait}/${list.length} séances</p>`;
+      html += `<p class="plan-week">Semaine du ${start.toLocaleDateString("fr-FR", opts)} au ${end.toLocaleDateString("fr-FR", opts)} \u2014 pr\u00e9vu ${kmPrev ? kmPrev.toFixed(1) + " km" : "\u2014"}${durPrev ? " \u00b7 " + fmtDurShort(durPrev) : ""} \u00b7 r\u00e9alis\u00e9 ${kmFait ? kmFait.toFixed(1) + " km" : "\u2014"}${durFait ? " \u00b7 " + fmtDurShort(durFait) : ""} \u00b7 ${nFait}/${list.length} s\u00e9ances</p>`;
       html += '<div class="table-wrap"><table><thead><tr><th>Fait</th><th>Date</th><th>Séance prévue</th><th>Prévu</th><th>Réalisé</th><th>Écart</th></tr></thead><tbody>';
       for (const x of list) {
         const act = findSessionActivity(x.s);
-        const real = act ? (act.distance != null ? act.distance.toFixed(1) + " km" : fmtDuration(act.duration)) : "";
+        const real = act
+          ? [act.distance != null ? act.distance.toFixed(1) + " km" : "", act.duration ? fmtDurShort(act.duration) : ""].filter(Boolean).join(" \u00b7 ")
+          : "";
+        const prevTxt = x.s.km != null ? x.s.km.toFixed(1) + " km" : (x.s.dur ? fmtDurShort(x.s.dur) : "\u2014");
         const ecart = act && act.distance != null && x.s.km != null
           ? (act.distance - x.s.km > 0 ? "+" : "") + (act.distance - x.s.km).toFixed(1) + " km"
           : "";
@@ -1223,7 +1257,7 @@ function renderPlan() {
           <td><button class="check-btn" data-ptoggle="${e.id}:${x.idx}" aria-label="Cocher la séance">${x.s.done ? "✓" : ""}</button></td>
           <td>${x.s.date ? esc(fmtDate(x.s.date)) : '<span class="delta-flat">\u00e0 planifier</span>'}</td>
           <td>${esc(x.s.label)}</td>
-          <td>${x.s.km != null ? x.s.km.toFixed(1) + " km" : "—"}</td>
+          <td>${prevTxt}</td>
           <td>${act ? esc((act.title || "Séance") + (real ? " · " + real : "")) : '<span class="delta-flat">—</span>'}</td>
           <td>${ecart ? esc(ecart) : ""}</td>
         </tr>`;
