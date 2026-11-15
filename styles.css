@@ -178,3 +178,6 @@ footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 1.
 .check-btn:hover { background: rgba(78, 205, 196, .15); }
 tr.session-done td { opacity: .55; }
 tr.session-done td:nth-child(3) { text-decoration: line-through; }
+
+.plan-preview-list { margin: .35rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: .85rem; }
+.plan-preview-list li { margin: .1rem 0; }
